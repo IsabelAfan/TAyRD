@@ -1,0 +1,343 @@
+---
+title: "Tipos de Interes"
+author: "Isabel Afán de Ribera"
+date: "10/11/2020"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introducción
+
+El Análisis de Componentes Principales es una técnica de interdependencia que tiene como objetivo reducir el número de variables originales hasta un número menor de componentes de forma que cada uno de ellos forma un índice de las variables originales; el número de componentes mantenidos debe recoger la mayor parte posible de la varianza de los datos. Por su parte el Análsis Factorial trata de identificar la estructura interna, subyacente, que explica la interacción entre las variables. A través de esta práctica vamos a verificar la idoneidad entre estos dos métodos ACP - ANFAC
+
+# Descripción de la base de datos
+
+Vamos a trabajar con el dataset ACPTIUSD compuesto por 978 observaciones y 11 variables relativas a la información sobre rendimientos de 10 bonos americanos a distintos plazos entre el 2 de enero de 1995 y el 30 de septiembre de 1998.
+
+Variables:
+
+* `X`: fecha
+* `DEPO 1M`: depósito a 1 mes
+* `DEPO 3M`: depósito a 3 mes
+* `DEPO 6M`: depósito a 6 mes
+* `DEPO 12M`: depósito a 12 mes
+* `IRS 2Y`: Interest Rate Swap 2 años
+* `IRS 3Y`: Interest Rate Swap 3 años
+* `IRS 4Y`: Interest Rate Swap 4 años
+* `IRS 5Y`: Interest Rate Swap 5 años
+* `IRS 7Y`: Interest Rate Swap 7 años
+* `IRS 10Y`: Interest Rate Swap 10 años
+
+# Objetivo del trabajo
+
+El objetivo de este análisis es efectuar una comprobación empírica mediante la aplicación del ACP al conjunto de datos descritos anteriormente. Pretendiendo verificar si, tal y como plantean los estudios teóricos, puede establecerse una estructura subyacente que sintetice y agrupe los distintos plazos en virtud de sus características comunes. Para ello, utilizaremos las 949 primeras observaciones (denominadas observaciones activas) y las 9 primeras variables (las variables activas).
+
+# Librerias 
+
+```{r Libraries and functions, include=FALSE, message=FALSE, warning=FALSE}
+library(factoextra) # analisis de componentes principales
+library(FactoMineR) # analisis de componentes principales
+library(ggplot2) # visualizacion
+library(reshape2) # para melt del dataframe
+library(Hmisc) # para los nudos
+library(corrplot) # para visualizar las correlaciones
+library(PerformanceAnalytics) # para chart de correlaciones
+library(ppcor) # matriz de correlaciones parciales
+library(psych) # test Bartlett
+library(imputeTS) # NA mean
+library(rela) # KMO, MSE
+library(pls) # prediccion 
+```
+
+# Carga de la base de datos
+
+```{r Read Data, include=FALSE}
+TIUSD = read.csv("ACPTIUSD.csv", sep=";")
+## ELEMENTOS:
+# Observaciones activas, las empleadas para efectuar el análisis;
+# Observaciones suplementarias, las que usaremos para predecir
+# Variables activas y suplementarias, idem que los individuos pero en variables.
+#Aquí, trataremos como observaciones activas las 949 primeras y suplementarias las 950 a 978;
+# y como variable suplementaria, a predecir, la IRS.10Y
+head(TIUSD)
+tail(TIUSD)
+```
+# Análisis exploratorio
+
+```{r EDA, include=FALSE}
+# visualización
+TIUSD2 = TIUSD[complete.cases(TIUSD), ] # observaciones completas
+TIUSD2$Fechas = as.Date(TIUSD2$X, format = "%d/%m/%Y") # creo vector de fechas X
+TIUSD2=TIUSD2[,2:12]
+```
+
+```{r, include=FALSE}
+# Función melt de reshape2: "estira" el data frame
+data_long = melt(TIUSD2, id="Fechas") 
+# el identificador es la fecha, hago melt para poder visualizar con ggplot2 el rendimiento de cada bono a lo largo del tiempo
+ggplot(data=data_long, aes(x= Fechas, y=value,  color=variable)) +
+#geom_line()
+  geom_point(alpha = 0.3,  position = position_jitter()) +  #stat_smooth(method = "lm") +
+  labs(y = "Tipo", colour="Bono")
+```
+```{r, include=FALSE}
+TIUSD.act = TIUSD[1:949, 1:9] # nuevo dataframe con filas de 1 a 949 y columnas 1 a 9
+head(TIUSD.act)
+str(TIUSD.act)
+
+Dates=as.Date(TIUSD.act$X, format = "%d/%m/%y") #creamos un vector de fechas...
+TIUSD.act=TIUSD.act[,-1] #... para extraer la primera columna (de fechas) del objeto de trabajo
+head(Dates)
+str(Dates)
+```
+
+```{r, include=FALSE}
+# summary
+summary(TIUSD.act)
+# otra forma para que me incluya medidas de dispersión, con apply creando un df
+TIUSD.act_stats = data.frame(
+        Min = apply(TIUSD.act, 2, min, na.rm=TRUE), # mín
+        Q1 = apply(TIUSD.act, 2, quantile, 1/4, na.rm=TRUE), # 1er cuartil
+        Med = apply(TIUSD.act, 2, median, na.rm=TRUE), # mediana
+        Mean = apply(TIUSD.act, 2, mean, na.rm=TRUE), # media
+        SD = apply(TIUSD.act, 2, sd), # Desviación típica
+        Q3 = apply(TIUSD.act, 2, quantile, 3/4, na.rm =TRUE), # 3er cuartil
+        Max = apply(TIUSD.act, 2, max, na.rm=TRUE) # Máx
+)
+TIUSD.act_stats=round(TIUSD.act_stats, 1)
+TIUSD.act_stats
+```
+
+# ¿Tiene sentido llevar a cabo, en este caso, un análisis de componentes principales?
+
+## Análisis de la matriz de correlación
+
+Aquí el objetivo será comprobar si las características de la matriz son adecuadas o no para llevar a cabo el Análisis Factorial (ANFAC).
+
+```{r correlation matrix, include=FALSE}
+cor.mat = round(cor(TIUSD.act),2) #problemas con los NA; dos opciones: use="complete.obs" que elimina la fila completa allí donde
+        #existe un NA (opción radical pero recomendada) o bien use="pairwise.complete.obs", que los elimina los pares de datos afectados;
+        # en principio, parecería más adecuada pero puede dar lugar a problemas de matrices no definidas-positivas.
+cor.mat #problema: los NAs
+cor.mat = round(cor(TIUSD.act, use = "complete.obs"),2)
+cor.mat
+# Plazos crecientes segun crece cae la correlacion en la primera fila, en la segunda pasa lo contrario. Además, parece existir una asociacion de acuerdo con el plazo, factores subyacentes asociados a los plazos
+```
+
+```{r, include=FALSE}
+#si queremos conocer los nds, niveles de significacion
+cor.mat.nds = rcorr(as.matrix(TIUSD.act)) # as.matrix para que trate el df como una matriz
+cor.mat.nds #genera tres elementos en la salida: R(correlaciones), nº de observaciones, nds(nudos)
+
+# Con respecto a la última matriz devuelta relativa a los nudos o nivel de significación del estadístico de contraste en la hipótesis de incorrelación, puede decirse que se rechaza la Ho pues los nudos son muy pequeños, iguales a cero. Las variables si estan correlacionadas.
+```
+
+```{r correlation graph, echo=FALSE}
+# Podemos visualizarlo mediante un correlograma
+corrplot::corrplot(cor.mat, type="lower", order="original", 
+#type=lower hace ref a cómo queremos visualizar la matriz, si por debajo, completa o por encima de la diagonal principal; Method cambia la salida; probar "pie", "number" o "color"
+tl.col="black", tl.cex=0.7, tl.srt=45)  # las correlaciones positivas en azul, las negativas en rojo tl.col, color etiquetas; tl.srt, ángulo etiquetas (string rotation)
+corrplot::corrplot(cor.mat, type="full", order="hclust", addrect = 3,
+tl.col="black", tl.cex=0.7, tl.srt=45) #permite visualizar clusters
+```
+
+Ninguna correlacion entre las variables es negativa, por pequeña que sea la asociacion siempre es directa. En general existe una alta correlacion entre las variables excepto en el caso de los bonos a 1 y 3 meses con correlaciones bajas con los bonos de 12 meses a 5 años. El segundo correlograma nos devuelve 3 grupos o clusters dividiendo los bonos por plazos. El primer grupo, es el relativo a los bonos a corto plazo incluyendo los depositos a 1 mes y 3 meses. El segundo grupo, relativo al medio plazo incluye los depositos a 6 y 12 meses. El tercero, hace referencia al largo plazo e incluye los swaps a 2, 3, 4 y 5 años. En cada uno de los grupos se aprecia que las variables estan muy asociadas, comportamiento comun.
+
+Estos resultados nos llevan a concluir la alta correlación entre las variables y, por tanto, el Análsis Fcatorial puede tener sentido.
+
+```{r chart, include=FALSE}
+# también podemos visualizar un chart de correlaciones 
+chart.Correlation(TIUSD.act, histogram=TRUE, pch=19)
+# La distribución de frecuencias de cada variable, 
+# diagramas de dispersión por pares con línea de ajuste
+#el valor del coeficiente de corr con el nds como estrellas: p-valores(0, 0.001, 0.01, 0.05, 0.1, 1) <=> símbolos("***", "**", "*", ".", " ")
+```
+
+```{r heat map, echo=FALSE}
+# mapa de calor
+col = colorRampPalette(c("red", "white", "blue"))(20) #definimos la paleta de colores;
+heatmap(x = cor.mat, col = col, symm = TRUE) # symm = T  si la matriz es simétrica
+```
+En el mapa de calor pueden apreciarse tres separaciones: los bonos de 1, 3 y 6 meses; los bonos de 12 meses 5 y 4 años; los bonos de 4 a 2 años, pero claramente la division de grupos mas clara es la que separa los depositos a 6 meses con los de 12.
+
+## Determinante de la matriz de correlaciones
+
+```{r determinante, include=FALSE}
+det(cor.mat)
+```
+El determinante de la matriz es muy pequeño (5.5021e-12), lo cual indica alta asociación entre las variables, siendo por ello adecuado llevar a cabo el ANFAC.
+
+## KMO
+
+Es una medida de adecuación de la muestra; este índice permite comparar las magnitudes de los coeficientes de correlación observados con las magnitudes de los coeficientes de correlación parcial.
+
+```{r KMO, include=FALSE}
+# Para verificar la idoneidad del ACP - ANFAC
+# El KMO lo hace a partir de la matriz de correlaciones parciales, inversa de la matriz de correlaciones
+invR = solve(cor.mat)
+invR
+```
+```{r, include=FALSE}
+# uso de library rela
+res <- paf(as.matrix(TIUSD.act))
+summary(res)
+```
+KMO de 0.83799 (siempre esta entre 0 y 1). Se trata de un valor alto, mayor a 0.7, es conveniente el uso deL ANFAC. En el caso de la matriz de adecuación de la muestra (MSA) el valor de los coeficientes es alto (cercano a 1), lo que indica que puede aplicarse ANFAC.
+
+## Prueba de esfericidad de Bartlett
+
+Se emplea para contratar la hipótesis de que la matriz de correlaciones es una matriz identidad, I. Siendo la Ho: R = I
+
+```{r test Bartlett, include=FALSE}
+# Para verificar la idoneidad del ACP - ANFAC
+cortest.bartlett(TIUSD.act)
+```
+Un determinante próximo a cero implica que una o más variables podrían expresarse como combinación lineal de otras variables. En este caso se rechaza la hipótesis nula, p-value igual a 0, la variables si estan relacionadas por tanto una o más variables pueden expresarse como combinación lineal de otras variables. Hay asociación entre las variables y, por tanto, es adecuado el empleo del ANFAC.
+
+## Correlación anti-imagen
+
+En esta prueba se emplea la matriz de correlaciones parciales, la cual permite
+determinar el grado de asociación exclusivo entre dos valores, eliminando la influencia que el resto de variables pueda tener sobre cualquiera de las dos cogidas.
+
+```{r, include=FALSE}
+#Matriz de correlaciones parciales  (-1 * matriz anti-imagen de spss, sin la diagonal)
+TIUSD.act.C = TIUSD.act[complete.cases(TIUSD.act),] #necesitamos la matriz de observaciones SIN NA's
+p.cor.mat = pcor(TIUSD.act.C) #devuelve la matriz de correlaciones parciales (estimate), los p-valores, el valor del estadístico t(t-statistic), el tamaño muestral (n) y más
+p.cor.mat
+```
+De nuestra matriz de coeficientes parciales concluimos que la mayoria de coeficientes son bajos e incluso negativos (anti-imagen), siendo adecuado el uso del ANFAC.
+
+# ¿Cuántos componentes permitirían explicar, adecuadamente, la estructura subycente de los tipos de interés aquí analizados? Análisis de componentes principales.
+
+## Varianza explicada
+
+```{r varianza explicada, echo=FALSE, warning=FALSE}
+acp_bonos = PCA(TIUSD[,2:10], graph=T) # todas las columnas menos fecha e IRS10Y
+```
+Según se aprecia en el gráfico la dimensión 1 explica el 80.76% de la varianza mientras la segunda dimensión explica un 17.64 %, y ambas dimensiones explican un total del 98.4% de la varianza. Además, si observamos los ejes veremos que hay una clara división en dos grupos de bonos, los del corto y los del largo plazo. En la parte derecha del eje vertical se encuentran los bonos de 1 mes a 12 meses siendo este último el divisor con los del largo plazo (bonos de 2 a 7 años) situados en la parte inferior derecha del eje horizontal.
+
+
+## Gráfico de sedimentación
+
+```{r sedimentación, include=FALSE}
+acp_bonos$eig # con FacotMineR, me da los autovalores (valores propios) de la matriz de correlaciones
+get_eig(acp_bonos) # con factoextra, get_eig devuelve los valores propios/varianzas de los componentes principales
+
+# Cada componente y cada dimensión representan a cada una de las 9 variables con las que estamos trabajando. Aquí podemos analizar la explicación que de la variabilidad total ofrece cada factor. Podemos completar esta información con un gráfico de sedimentación.
+```
+
+```{r scree plot, echo=FALSE}
+fviz_eig(acp_bonos, addlabels=TRUE, hjust = -0.3)+
+        labs(title="Scree plot / Gráfico de sedimentación", x="Dimensiones", y="% Varianza explicada")
+        theme_minimal()
+# fviz_eig visualizacion de los valores propios con factoextra
+```
+
+Esta gráfica de sedimentación muestra que las dos primeras dimensiones explican la mayor parte de la variabilidad total en los datos (dada por los valores propios).El resto de dimensiones explican una proporción muy pequeña de la variabilidad y probablemente no son importantes.
+
+## Contribución de las variables a cada dimensión
+
+```{r, include=FALSE}
+# Contribucion de las variables a las dimensiones más representativas de la variabilidad, dimension 1 y 2
+
+acp_bonos$var$contrib[,1:2]
+```
+
+```{r, echo=FALSE}
+# Contribución de las variables a la dimensión 1
+fviz_contrib(acp_bonos, choice="var", axes = 1 ) +
+        labs(title = "Contribuciones a la Dimensión 1")
+# fviz_contrib visualizacion de la contribucion
+
+# Contribución de las variables a la dimensión 2
+fviz_contrib(acp_bonos, choice="var", axes = 2 ) +
+        labs(title = "Contribuciones a la Dimensión 2")
+```
+
+En el caso de la dimensión 1 prácticamente todos las variables contribuyen al mismo nivel excepto la variable de bono a 1 y 3 meses que contribuyen en menor medida. En el caso de la dimensión 2 ocurre lo contrario, siendo la variable de bono a 1 y 3 meses las que más contribuyen en la dimensión con gran diferencia con respecto al resto de variables.
+
+# Calidad de la representación
+
+```{r, echo=FALSE}
+acp_bonos$var$cos2 # cos2, calidad de la representacion de las variables sobre el mapa factorial
+corrplot::corrplot(acp_bonos$var$cos2, is.corr=FALSE) # para visualizar el cos2 de las variables en todas las dimensiones
+```
+Como se observa de los resultados de la tabla cos2 (cosenos altos) y del gráfico de correlaciones (intensidad de color) existe una buena representación de las variables bonos a 6 meses hasta la variable bono a 7 años en el componente principal (Dim 1). Mientras que en el componente principal (Dim 2) la mejor representación viene dada por la variable bono a 1 mes con un coseno cuadrado de 0.738.
+
+# ¿Tiene sentido llevar a cabo una rotación de las variables subyacentes? 
+
+La rotación factorial consiste en hacer girar los ejes de coordenadas que representan a los factores, hasta conseguir que se aproximen al máximo a las variables en que están saturados.
+
+## Rotación varimax
+
+Método de rotación ortogonal que minimiza el número de variables que tienen saturaciones altas en cada factor. Simplifica la interpretación de los factores.
+
+```{r, echo=FALSE}
+rot_matrix <- varimax(acp_bonos$var$cor[,1:2]) # con datos acp_bonos y matriz de componentes
+rot_matrix
+
+# funcion varimax proporciona los loadings rotados, proporción de varianza explicada y la matriz de rotación
+```
+La varianza explicada por el primer factor(Dim.1), 80.8% ha disminuido al 67% mientras que el segundo factor (Dim.2) que explicaba un 17.6% ha pasado a explicar un 31.4% con esta rotación de la matriz. Sin embargo, la varianza acumulada sigue siendo la misma que en el ACP 98.4%.
+
+Los factores principales ya no se orientan en las direcciones de máxima variación sino que se reorientan en función de otros objetivos y esta se distribuye más homogéneamente entre todos los factores. 
+
+Por otra parte, cambia también la contribución de cada variable a las dimensiones. Por ejemplo, en la dimensión 2, donde antes la gran parte de la contribución provenia del bono a 1 y 3 meses, ahora también contribuye en alta proporción con un 0.729. Mientras en la dimensión 2 las contribuciones se mantienen bastante similares pero ya no es el bono a 12 meses el que más contribuye sino los bonos de entre 2 y 7 años. Se aprecia por tanto una división más clara en los factores entre los bonos a corto y más largo plazo.
+
+# Predicción del bono a 10 años
+
+Predecimos mediante regresión de componentes principales. Primero, para poder evaluar la capacidad predictiva del modelo, dividimos las observaciones en dos grupos: uno de training para ajustar el modelo y otro de test para predecir.
+
+```{r, include=FALSE}
+TIUSD <- na_mean(TIUSD) # hacemos media de NA para no perder datos
+training <- TIUSD[1:949, 2:11]  # observaciones activas
+test <- TIUSD[950:978, 2:11] # observaciones suplementarias
+```
+El método PCR es un ajuste lineal por mínimos cuadrados que emplea componentes principales como predictores. Utilizamos la función pcr() -principal components regression- del paquete pls e incluimos cross validation para identificar el número óptimo de componentes con el que se minimiza el MSE.
+
+```{r, include=FALSE}
+# usamos paquete (pls)
+set.seed(123) # semilla
+modelo_pcr <- pcr(formula = `IRS.10Y` ~ ., data = training, scale. = TRUE,
+                  validation = "CV")
+modelo_pcr_CV <- MSEP(modelo_pcr, estimate = "CV") # estimar por cross validation
+which.min(modelo_pcr_CV$val)
+```
+
+```{r, include=FALSE}
+ # Test-MSE
+predicciones <- predict(modelo_pcr, newdata = test, ncomp = 8) # ncomp incluimos el valor obtenido
+test_mse <- mean((predicciones - test$`IRS.10Y`)^2) 
+test_mse 
+```
+El número óptimo de componentes principales identificado por cross validation para minimizar el MSE es de 8.La estimación del error de predicción obtenido mediante el Mean Square Error (MSE) da es de 0.000236.
+
+# Conclusiones
+
+Tras el análisis realizado puede concluirse. En primer lugar, que si tiene sentido llevar a cabo un análisis de componentes principales pues tras las diversas pruebas realizadas se ha podido corroborar la alta asociación entre las variables. 
+
+En segundo lugar, y en relación a los componentes que permiten explicar la estructura subyacente de los tipos de interés, se ha concluido que son suficientes dos dimensiones para explicar esta estructura pues representan el 98.4% de la varianza. Además, dentro de cada dimensión se ha comprobado que en el caso de la dimensión 1 prácticamente todos las variables contribuyen al mismo nivel excepto la variable de bono a 1 y 3 meses que contribuyen en mucha menor medida. Con respecto a la dimensión 2 ocurre lo contrario, son las variables bono a 1 y 3 meses las que más contribuyen.
+
+En tercer lugar, con respecto a la rotación de las variables subyacentes puede decirse que no seria necesaria dicha rotación pues el porcentaje de varianza acumulada explicada por los factores se mantiene igual, 98.4%.
+
+Por último, cabe concluir que a través de un modelo de regresión de componentes principales hemos podido realizar la predicción del bono a 10 años en el que hemos obtenido que el número óptimo de componentes principales para minimizar el error es de 8 con un error de 0.000236.
+
+# Referencias
+
+* Análisis de Componentes Principales (Principal Component Analysis, PCA) y t-SNE.
+Disponible en: https://rpubs.com/Joaquin_AR/287787
+
+* Estadística y Machine Learning con R. Disponible en: https://rpubs.com/PacoParra/293407#:~:text=La%20prueba%20de%20esfericidad%20de,modelo%20factorial%20no%20ser%C3%ADa%20pertinente.
+
+* Interpretar todos los estadísticos y gráficas para Análisis factorial. Disponible en: https://support.minitab.com/es-mx/minitab/18/help-and-how-to/modeling-statistics/multivariate/how-to/factor-analysis/interpret-the-results/all-statistics-and-graphs/
+
+* Introducción a los Métodos Multivariantes. Disponible en: https://rpubs.com/marcelo-chavez/multivariado_1
+
+* Principal Component Methods in R: Practical Guide. Disponible en: http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/112-pca-principal-component-analysis-essentials/
+
+
