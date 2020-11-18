@@ -1,0 +1,354 @@
+---
+title: "Análisis factorial de correspondencias"
+author: "Isabel Afán de Ribera"
+date: "15/11/2020"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE) 
+```
+
+# Introducción
+
+En el presente trabajo se va a realizar un Análisis Factorial de correspondencias sobre los datos recopilados en una encuesta SocioMétrica por _El Español_ en enero de 2018. Dicha encuesta fue realizada a 11.610 españoles mayores de edad en la que se les preguntaba sobre el partido político de preferencia y su situación laboral.
+
+El _análisis de correspondencias_ o _ANACOR_ es una técnica de reducción de la dimensión que persigue estudiar la asociación entre dos o más variables categóricas. Consiste en tres etapas: análisis de independencia, análisis de correspondencia y reducción de la dimensión e interpretación.
+
+
+# Objetivo
+
+Pretendemos conocer si se puede establecer una relación entre la situación laboral de los encuestados y sus preferencias por partido político, para ello emplearemos el análisis de correspondencias.
+
+# Descripción del dataset
+
+El dataset consiste en 5 variables que conforman las columnas y 5 observaciones que conforman las filas y van referidas a la situación laboral. Las variables son:
+
+* `PP`: Partido Popular
+* `PSOE`: Partido Socialista Obrero Español
+* `UP`: Unidas Podemos
+* `Cs`: Ciudadanos
+* `Resto`: Otros partidos políticos
+
+
+```{r librerias y funciones,  message=FALSE, warning=FALSE, include=FALSE}
+library(FactoMineR) # acp
+library(factoextra) # acp
+library(skimr) # best summaries
+library(ggplot2) # visualizacion
+library(gplots) # visualizacion
+library(corrplot) # correlaciones
+library("vcd") # mosaic
+```
+
+```{r data, include=FALSE}
+votos <- read.csv("AFC-votos.csv", sep = ";", row.names = "X")
+# Elementos:
+# Las columnas corresponden a los distintos partidos politicos y a la situacion laboral (X)
+# Las filas hacen referencia a las observaciones sobre situacion laboral
+```
+
+```{r view data, include=FALSE}
+# nombre de las variables
+names(votos)
+
+# vista del dataset
+View(votos)
+
+# dimension
+dim(votos)
+```
+
+
+```{r dataframe, include=FALSE}
+# dataframe
+votos
+```
+
+# Análisis exploratorio de los datos
+
+En primer lugar, comenzaremos con un análisis exploratorio de los datos para obtener una primera aproximación sobre los mismos.
+
+```{r skim, include=FALSE}
+skim(votos)
+# obtenemos los estadisticos principales mediante la función skim() del paquete skimr
+# vemos que no hay valores nulos, que por media el PSOE es el partido mas votado y que la menor desviacion estandar con diferencia esta en Cs pues los grupos de sus votantes son mas homogeneos
+```
+
+Si nos fijamos en el gráfico de correlaciones podemos empezar viendo que la mayoría de correlaciones son negativas o poco apreciables (transparencia del número), por tanto, la situación laboral tiene una relación negativa o influencia muy pequeña sobre las preferencias por partido político. 
+
+```{r correlation, echo=FALSE, fig.height = 5, fig.width =5, fig.align = "center"}
+correlation <- cor(votos)
+corrplot(correlation, method="number", type="upper")
+```
+Para obtener algo más de información  pasamamos a analizar las relaciones a través de un gráfico _ballonplot_ pues este nos permite visualizar los pesos relativos. En el caso de PP, PSOE, UP y el Resto de partidos vemos por el tamaño de los círculos que la masas más notables se dan en las situaciones laborales de Jubilados, Domestico, Parados y Estudiantes respectivamente. Sin embargo, en el de Cs no hay un claro sector mayoritario sino que los votos se dividen de forma muy homogenea en el caso de Cs.
+
+```{r tabla, include=FALSE}
+# convertimos el dataframe en una tabla as.table
+tabla <- as.table(as.matrix(votos))
+```
+```{r ballonplot, echo=FALSE, fig.height = 5, fig.width = 7, fig.align = "center"}
+# representamos graficamente
+balloonplot(t(tabla), main ="votos", xlab ="", ylab="",
+            label = FALSE, show.margins = FALSE)
+```
+```{r mosaic, include=FALSE}
+# otra forma de representarlo
+mosaic(head(tabla), shade = T, las=5)
+```
+# Contraste de independencia, prueba Chi-cuadrado
+
+```{r chi cuadrado,include=FALSE}
+# creamos objeto chisq
+# contraste de independencia 
+chisq <- chisq.test(votos)
+chisq
+```
+Para contrastar la independencia entre categorías hemos realizado _la prueba Chi cuadrado_ obteniendo un p-valor de practicamente 0, por lo tanto, rechazamos la hipótesis de independencia y confirmamos la existencia de alguna relación entre las filas y las columnas, en nuestro caso, situación laboral y partidos políticos.
+
+# Análisis de correspondencias
+
+Una vez confirmada la existencia de relación entre categorías resulta adecuado realizar un _análisis de correspondencias_ para identificar cuáles son estas relaciones en un espacio de dos dimensiones. 
+
+```{r afc, include=FALSE}
+# creamos objeto afc donde incluimos el dataframe e indicamos que no queremos grafico
+# CA() coordenadas de filas y columnas
+votos.afc <- CA(votos, graph=FALSE)
+print(votos.afc)
+```
+```{r summary, include=FALSE}
+# resumen del ANACOR para las dos primeras dimensiones
+summary(votos.afc, nb.dec = 2, ncp = 2)
+```
+Tras los calculos de _análisis de correspondencia_ hemos obtenido que la varianza explicada por el primer factor o dimensión es del 64.65% y del 24.45% por el segundo factor, siendo la suma de ambos un 89.1%. Por tanto, podemos confirmar que puede implementarse una reducción de la dimensión a dos dimensiones. 
+
+# Interpretación del análisis de correspondencias
+
+## Nivel de asociación entre filas y columnas
+
+La primera etapa del ANACOR pasa por conocer si se da o no una asociación significativa entre filas y columnas; para ello, podemos emplear dos métodos alternativos:
+
+  1. La traza;
+  2. El estadístico chi cuadrado
+
+Para el primero de ellos hemos obtenido un resultado de 0.38, lo cual indica que existe asociación entre los elementos pues como regla empírica, suele emplearse 0.2 como umbral por encima del cual la correlación puede considerarse como importante. Para el segundo obtuvimos anteriormente un valor de 1704.3 con un nivel de significación de 0. Con estas dos referencias podemos decir que se rechaza la hipotesis de independencia entre filas y columnas y, por lo tanto, puede continuarse con el análisis. 
+
+```{r autovectores, include=FALSE}
+autov <- get_eigenvalue(votos.afc)
+traza <- sum(autov[,1]) #  suma de todos los autovalores
+cor.coef <- sqrt(traza) # coeficiente de correlación entre filas y columnas
+cor.coef
+```
+```{r chisq, include=FALSE}
+# Estadístico chi cuadrado
+chi2 <- traza*sum(as.matrix(votos)) 
+chi2
+```
+
+```{r gl, include=FALSE}
+# Grados de libertad del estadístico
+grados <- (nrow(votos) - 1) * (ncol(votos) - 1)
+grados
+```
+
+```{r pval, include=FALSE}
+# Nivel de significación del estadístico de contraste, o p-valor
+pval <- pchisq(chi2, df = grados, lower.tail = FALSE)
+round(pval, 2)
+```
+
+## Autovalores y gráfico de sedimentación
+
+```{r autovalores, include=FALSE}
+# get_eigenvalue, proporción de varianza explicada por las distintas dimensiones o ejes
+autoval <- get_eigenvalue(votos.afc)
+head(round(autoval, 2))
+```
+Como se analizó anteriormente el mayor porcentaje de varianza es explicado por la dimensión 1 seguido de la 2 y acumulando ambas un 89.1 siendo considerablemente representantivas de la variabilidad. A continuación podemos observar de forma gráfica la varianza explicada por cada dimensión y confirmar que claramente el factor 1 y 2 explican la mayor parte de varianza.  y que, por tanto, podemos reducir las dimensiones de 4 a 2.
+
+```{r screeplot, echo=FALSE, warning=FALSE, fig.height = 4, fig.width = 6, fig.align = "center"}
+# screeplot o gráfico de sedimentación 
+fviz_screeplot(votos.afc) +
+  ggtitle("Gráfico de sedimentación") +
+  labs(x="Dimensiones",y="Porcentaje de varianza explicada")
+```
+
+## Gráfico de dispersión del análisis de correspondencias entre filas y columnas
+
+```{r plot CA, echo=FALSE, fig.height = 5, fig.width =7, fig.align = "center"}
+# función plot.CA() de FactoMineR
+# representar las coordenadas de filas y columnas en el espacio de dos dimensiones
+plot.CA(votos.afc, axes = c(1,2), col.row = "aquamarine4", col.col = "darkorange1")
+```
+
+En esta representación simétrica, donde el eje horizontal representa a la dimensión 1 y el eje vertical a la dimensión 2, podemos ver mediante la distancia entre los elementos representados (filas y columnas) como son de fuertes las relaciones. Vemos que los elementos Parado, Trabaja (filas) y Cs (columna) se encuentran bastante cercanos al eje vertical de la dimensión 2 indicando la fuerte asociación. Al igual que PP y Jubilado y PSOE y Domestico. Mientras que Resto y Estudiante están muy relacionados pero poco asociados a los ejes. Al igual que UP del que no se perciben correspondencias con otros elementos ni asociación con los ejes.
+
+## Contribución y calidad de representación de filas y columnas
+
+### Contribución de las filas a cada dimensión
+
+```{r, include=FALSE}
+# función get_ca_row()
+# objeto tipo lista que contiene las coordenadas, el cos2, la contribución y la inercia de las variables de fila
+filas <- get_ca_row(votos.afc)
+filas
+```
+
+```{r, include=FALSE}
+# coordenadas de las filas
+head(filas$coord)
+```
+
+```{r posicion, include=FALSE}
+# Gráfico para visualizar la posición de las filas en el espacio de los ejes 
+fviz_ca_row(votos.afc, col.row = "aquamarine4")
+```
+
+```{r, include= FALSE}
+# representación en mapa 2D, graduacion en virtud del poder explicativo de la variable a la dimensión
+fviz_ca_row(votos.afc, col.row="contrib")+
+        scale_color_gradient2(low="white", mid="blue", 
+                      high="red", midpoint=10)+
+        theme_minimal()
+```
+
+```{r, include=FALSE}
+# contribución de las filas a cada dimensión
+head(filas$contrib)
+```
+
+```{r, include=FALSE}
+# grafico para conocer la contribucion de las filas a la explicación del eje
+corrplot(filas$contrib, is.corr=FALSE)
+```
+```{r, include=FALSE}
+# contribucion de las filas en la primera dimension
+fviz_contrib(votos.afc, choice = "row", axes = 1)+
+        ggtitle("Contribución de las filas a la 1ª dimensión")+
+        labs(x="Filas",y="Porcentaje de contribución")
+```
+
+```{r, include=FALSE}
+# contribución de las filas a la segunda dimensión
+fviz_contrib(votos.afc, choice = "row", axes = 2) +
+        ggtitle("Contribución de las filas a la 2ª dimensión")+
+        labs(x="Filas",y="Porcentaje de contribución")
+```
+
+```{r, include=FALSE}
+# contribución total de las filas a las dos dimensiones
+fviz_contrib(votos.afc, choice = "row", axes = 1:2) +
+        ggtitle("Contribución de las filas a las dos dimensiones")+
+        labs(x="Filas",y="Porcentaje de contribución")
+```
+
+#### Calidad de la representacion de las filas 
+
+```{r, include=FALSE}
+# calidad de la representacion de las filas con cos2
+head(filas$cos2)
+```
+
+```{r, include=FALSE}
+# visualizamos la calidad de la representacion
+corrplot(filas$cos2, is.corr=FALSE)
+```
+
+```{r, include=FALSE}
+# Cos2 de las filas en las dos dimensiones
+fviz_cos2(votos.afc, choice = "row", axes = 1:2)+
+        ggtitle("Cos2 de las dos dimensiones")+
+        labs(y="Cos2 - calidad de la representación")
+```
+
+### Contribución de las columnas a cada dimensión
+
+```{r, include=FALSE}
+# función get_ca_col()
+# objeto tipo lista que contiene las coordenadas, el cos2, la contribución y la inercia de las variables de columnas
+columnas<- get_ca_col(votos.afc)
+columnas
+```
+
+```{r, include=FALSE}
+# contribución de las columnas a cada dimensión
+head(columnas$contrib)
+```
+
+```{r, include=FALSE}
+# grafico para conocer la contribucion de las columnas
+corrplot(columnas$contrib, is.corr=FALSE)
+```
+
+```{r, include=FALSE}
+# contribucion de las columnas en la primera dimension
+fviz_contrib(votos.afc, choice = "col", axes = 1)+
+        ggtitle("Contribución de las columnas a la 1ª dimensión")+
+        labs(x="Filas",y="Porcentaje de contribución")
+```
+
+```{r, include=FALSE}
+# contribucion de las columnas en la segunda dimension
+fviz_contrib(votos.afc, choice = "col", axes = 2)+
+        ggtitle("Contribución de las columnas a la 2ª dimensión")+
+        labs(x="Filas",y="Porcentaje de contribución")
+```
+
+```{r, include=FALSE}
+# contribución total de las columnas a las dos dimensiones
+fviz_contrib(votos.afc, choice = "col", axes = 1:2) +
+        ggtitle("Contribución de las columnas a las dos dimensiones")+
+        labs(x="Filas",y="Porcentaje de contribución")
+```
+
+#### Calidad de la representacion de las columnas
+
+```{r, include=FALSE}
+# calidad de la representacion de las columnas con cos2
+head(columnas$cos2)
+```
+
+```{r, include=FALSE}
+# Cos2 de las columnas en las dos dimensiones
+fviz_cos2(votos.afc, choice = "col", axes = 1:2)+
+        ggtitle("Cos2 de las dos dimensiones")+
+        labs(y="Cos2 - calidad de la representación")
+```
+
+## Representación conjunta de filas y columnas
+
+```{r grafico simetrico, include=FALSE}
+# Gráfico simétrico
+# relación entre los elementos de las filas y columnas con los ejes 
+fviz_ca_biplot(votos.afc, geom="text") +
+        ggtitle("Gráfico simétrico 2D de factores")
+```
+
+### Gráfico asimétrico
+
+Para representar conjuntamente filas y columnas empleamos el gráfico asimétrico 2D estándar, el cual mide a través del ángulo conformado por los vectores la asociación entre filas (situación laboral) y columnas (partido político) siendo esta mayor cuanto menor es el ángulo. En este caso se observa una alta asociación entre la fila Domestico y la Columna PSOE, también entre la fila Trabaja y Parado y la columna UP. Igualmente entre la fila Jubilado y la columna PP y entre Estudiantes y el Resto de partidos.
+
+```{r grafico asimetrico, echo=FALSE, fig.height = 5, fig.width = 7, fig.align = "center"}
+fviz_ca_biplot(votos.afc, map ="rowprincipal", arrow = c(TRUE, TRUE))+ 
+        ggtitle("Análisis de correspondencias simples. Gráfico asimétrico.") 
+```
+### Gráfico de contribuciones
+
+El gráfico de contribuciones permite visualizar, la contribución de los puntos de fila y/o columna a los ejes. En nuestro caso Parado contribuye fundamentalmente a la definición del eje 2 de forma positiva; por su parte Jubilado lo hace respecto del eje 1 de forma negativa. Por otro lado, Trabaja, Domestico y Estudiante contribuyen de forma muy parecida a ambos ejes. 
+
+```{r, echo=FALSE, fig.height = 5, fig.width =7, fig.align = "center"}
+fviz_ca_biplot(votos.afc, map ="colgreen",
+               arrow = c(TRUE, FALSE))
+```
+
+# Conclusiones
+
+Tras nuestro análisis podemos concluir que si existe una relación entre las características  situación laboral y preferencia de partido político. Y que por tanto puede realizarse el análisis factorial de correspondencias y puede llevarse a cabo una reducción de la dimensión de 4 a 2 dimensiones, pues con ello es posible explicar un 89.1% de la varianza.
+
+También con este análisis hemos podido comprobar la alta asociación entre ser votante del PP y estar en situación laboral de Jubilado, ser votante del PSOE y dedicarse laboralmente al sector domestico. Así como que no hay diferencias evidentes entre la situación laboral de los votantes de Cs ni tampoco entre los votantes de UP que se encuentran en situación de trabajo o paro. Y, por último, que un alto porcentaje de Estudiantes votan a otros partidos políticos.
+
+# Referencias
+
+* López Zafra, J.M. (2020). _El Análisis de correspondencias_. Técnicas de Agrupación y Reducción de la dimensión. Colegio Universitario de Estudios Financieros.
