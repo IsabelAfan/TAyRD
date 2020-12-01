@@ -1,0 +1,279 @@
+---
+title: "Los coches del jefe, reparto"
+author: "Isabel Afán de Ribera"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introducción
+
+Tras haber realizado un análisis exploratorio sobre las características de los coches y haber seleccionado las variables más relevantes procedemos a realizar un análisis cluster.
+
+# Objetivo 
+
+El objetivo de nuestro análisis es estudiar el número adecuado de grupos en los que dividir la colección de 125 todo terreno.
+
+# Descripción del dataset
+
+El dataset final cuenta con 125 observaciones y 9 variables que se especifican a continuación:
+
+* `cc`: Cilindrada (cm cúbicos)
+* `potencia`: Potencia (CV)
+* `rpm`: Revoluciones por minuto
+* `peso`: Peso en kg
+*`plazas`: Número de plazas
+*`cons120`: Consumo 120 km/h
+*`consurb`: Consumo urbano
+*`velocida`: Velocidad máxima
+* `acel2`: Tiempo de aceleración, 2 grupos 1(Menor a 10 seg) 2(Mayor a 10 seg)
+
+
+```{r libraries, message=FALSE, warning=FALSE, include=FALSE}
+library(haven)
+library(corrplot) # correlaciones
+library(PerformanceAnalytics) # EDA
+library(tidyverse)
+library(imputeTS) # NA mean
+library(dplyr)
+library(ggplot2) # visualizacion
+library(skimr) # summary
+library(factoextra) # graficos de distancias
+library(FactoMineR) 
+library(imputeTS) # NA mean
+library(cluster) # analisis cluster
+library(clustertend) # analisis cluster
+library(NbClust) # analisis cluster
+```
+
+
+```{r include=FALSE}
+# dataset original
+tterreno_original <- read_sav('tterreno.sav')
+View(tterreno_original)
+```
+
+
+```{r include=FALSE}
+# dataset tras la seleccion de variables
+tterreno <- tterreno_original[, -c(1,2,3,4,10,14)]
+```
+
+
+```{r warning=FALSE, include=FALSE}
+# hacemos un attach de los datos para que sea mas facil trabajar con ellos
+attach(tterreno)
+```
+
+
+```{r include=FALSE}
+# convertir a data frame
+tterreno <- data.frame(tterreno)
+``` 
+
+
+```{r skim, message=FALSE, warning=FALSE, include=FALSE}
+skim(tterreno)
+# se observa que hay 2 variables de tipo character y 7 numeric
+# valores NA: 15 en cons120, 7 en consurb y 3 en velocida
+```
+
+
+```{r include=FALSE}
+# imputamos los valores nulos con la media para no perder observaciones
+tterreno <- na_mean(tterreno)
+```
+
+
+```{r include=FALSE}
+# paso las variables character a numeric para poder trabajar con ellas
+tterreno$plazas <- as.numeric(tterreno$plazas)
+tterreno$acel2 <- as.numeric(tterreno$acel2)
+```
+
+# Desarrollo: análisis cluster
+
+Para proceder con el análisis cluster, y tras la exploración de los datos con los que vamos a trabajar, es fundamental contar con datos homogéneos en cuanto a su unidad de medida por ello el primer paso es escalar las variables.
+
+
+```{r Scaling, include=FALSE}
+## Tipificación de las variables
+# las variables del dataset estan medidas en distintas unidades
+# tipificación 
+# escalar las variables para que todas esten en la misma unidad de medida
+
+performScaling = T 
+if (performScaling) {
+  for (colName in names(tterreno)) {
+    if(class(tterreno[,colName]) == 'integer' | class(tterreno[,colName]) == 'numeric') {
+     tterreno[,colName] = scale(tterreno[,colName])
+     }
+  }
+}
+```
+
+
+```{r include=FALSE}
+summary(tterreno)
+# comprobamos que todas las medias son ahora cero
+```
+
+## Evaluación de la bondad del análisis cluster
+
+### Estadístico Hopkins
+
+Antes de aplicar un método de clustering a los datos es conveniente evaluar si hay indicios de que realmente existe algún tipo de agrupación en ellos. Un método es el estadístico de Hopkins que permite evaluar la tendencia de clustering de un conjunto de datos mediante el cálculo de la probabilidad de que dichos datos procedan de una distribución uniforme, es decir, estudia la distribución espacial aleatoria de las observaciones.
+
+Valores de estadístico en torno a 0.5 indican que los datos estudiados se distribuyen uniformemente (hipotesis nula) y que por lo tanto no tiene sentido aplicar clustering. Cuanto más se aproxime a 0 más evidencias se tienen a favor de que existen agrupaciones en los datos y si debe aplicarse clustering (hipótesis alternativa).
+
+
+```{r include=FALSE}
+set.seed(123)
+# estadistico de Hopkins
+hopkins(tterreno, n = nrow(tterreno)-1)
+```
+En nuestro caso se ha obtenido un estadístico de Hopkins de 0.1919, por tanto, existen agrupaciones en los datos y podemos realizar la técnica clustering.
+
+
+
+### Distancia Pearson
+
+Otra forma de inspeccionar la posibilidad de agrupacimiento de los datos analizados es mediante la visualización de similitudes entre los elementos.
+
+Para ello pasamos a calcular las distancias mediante la _matriz de distancias_ calculada a través de las correlaciones y de las distancias euclídeas de las observaciones. 
+
+Con respecto a las distancias calculadas mediante las correlaciones utilizamos el método Pearson para medir la similitud. Y lo representamos graficamente con un _heatmap_, el cual nos permite visualizar las distintas correlaciones entre las variables en una escala de color del 0 al 1.5 donde el 0 significa que no hay distancia entre las variables y, por tanto, se da la máxima correlación.
+
+
+
+```{r include=FALSE}
+# calculo de la matriz de distancias entre las columnas con la funcion get_dist, datos estandarizados y metodo pearson(coef.corr)
+
+q.dist <- get_dist(tterreno, stand = TRUE, method = "pearson")
+```
+
+
+```{r include=FALSE}
+# visualizacion de la matriz de distancias
+fviz_dist(q.dist, lab_size = 5) + labs(title = "Matriz de distancias Pearson")
+```
+
+
+```{r echo=FALSE}
+fviz_dist(q.dist, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), lab_size = 5) + labs(title = "Matriz de distancias Pearson")
+```
+
+
+Como puede observarse en el gráfico de distancias de Pearson existe posibilidad de formación de grupos, los cuales pueden identificarse mediante el color azul y rojo, siendo los azules los grupos con observaciones que menor distancia presentan y, por tanto, los más similares.
+
+
+
+```{r include=FALSE}
+### Distancia euclídea
+# Como segunda medida de proximidad se ha calculado la distancia euclídea, representada a continuación.
+
+dist.eucl <- get_dist(tterreno, method = 'euclidean')
+```
+
+
+```{r include=FALSE}
+corrplot(as.matrix(dist.eucl), is.corr = FALSE, method = "color", tl.cex=0.6, tl.col="blue")
+```
+
+
+```{r include=FALSE}
+corrplot(as.matrix(dist.eucl), is.corr = FALSE, method = "color", type="lower",
+diag=F, order="hclust", tl.cex=0.6, tl.col="blue")
+```
+
+
+```{r include=FALSE}
+# DENDROGRAMA
+plot(hclust(dist.eucl, method = "ward.D2"), cex=0.7, main="Dendrograma", ylab="Anchura",
+xlab="Análisis cluster aplicando Ward sobre matriz de distancias euclídeas")
+```
+
+
+## Identificación del número óptimo de grupos.
+
+Una vez aceptada la conveniencia de llevar a cabo el análisis cluster, pasamos a determinar el número óptimo de grupos. En este caso, se nos ha especificado de antemano el número máximo de grupos en los que pueden dividirse los datos con los que estamos trabajando.
+
+Trabajaremos con un máximo de 10 grupos correspondientes a los 10 lugares de los que dispone nuestro cliente para conversar sus vehículos todo terreno.
+
+Tras realizar el análisis estadístico correspondiente hemos obtenido que el número óptimo de grupos es de 2, sin embargo, esto no concuerda con los que el cliente nos solicita. Nuestro cliente dispone de 10 lugares en los que conservar sus vehículos y desea repartirlos de tal forma que pueda disponer de ellos en distintas ubicaciones de Francia, Italia y Suiza. 
+
+No resulta pues una forma eficiente conservar los 125 vehículos en dos únicos grupos ya que no se cumple con el objetivo del cliente ni los garajes tienen capacidad suficiente para albergar tantos coches. Por ello, se ha procedido a realizar una repartición por _kmeans_.
+
+Para ello se han realizado distintas comprobaciones con distintos números de grupos representandolos gráficamente y se ha llegado al resultado de que a partir de 4 grupos dejan de producirse solapamientos. Sin embargo, teniendo en cuenta que nuestro cliente desea distribuir sus vehículos en 6 ciudades europeas y que se produce poco solapamiento (como puede observarse en la gráfica más abajo),  se se considera más eficiente realizar la repartición en 6 grupos.  
+
+
+```{r include=FALSE}
+# prueba con paquete factoextra
+fviz_nbclust(x = tterreno, kmeans, FUNcluster = kmeans, method = "wss", k.max = 10, diss = dist.eucl, nstart = 25)
+# x: vector numérico, matriz o data frame;
+# method, método del hombro (suma total de cuadrados intra-clusters)
+# FUNcluster: la función de agrupacion es“kmeans”
+# diss matriz de dismilaridades a emplear
+```
+```{r include=FALSE}
+# número óptimo de clusters con el paquete NBclust, maximo 10 grupos
+set.seed(123)
+clus.nb = NbClust(tterreno, distance = "euclidean",
+min.nc = 2, max.nc = 10,
+method = "complete", index ="gap")
+clus.nb # resultados
+```
+
+
+```{r include=FALSE}
+# k=10
+tterreno.eclust10 = eclust(tterreno, FUNcluster = "kmeans", stand = FALSE,
+hc_metric="euclidean", nstart=25, k = 10)
+# k=número de clusters para fijar el numero de grupos
+# Probando el algoritmo con 10 grupos vemos que se producen algunos solapamientos
+```
+
+
+```{r echo=FALSE}
+# k = 6
+tterreno.eclust6 <- eclust(tterreno, FUNcluster = 'kmeans', stand = F, hc_metric = 'euclidean', nstart = 25, k = 6)
+# k=número de clusters para fijar el numero de grupos
+```
+
+
+```{r include=FALSE}
+# k = 4
+tterreno.eclust4 <- eclust(tterreno, FUNcluster = 'kmeans', stand = F, hc_metric = 'euclidean', nstart = 25, k = 4)
+# no se deja de producir solapamientos hasta los 4 grupos
+```
+
+```{r}
+# Gráfico de silueta (silhouette plot)
+fviz_silhouette(tterreno.eclust6)
+```
+
+# Conclusiones
+
+Tras el análisis se llega a la conclusión de que para cumplir con el objetivo de nuestro cliente resulta más conveniente atender a un a un criterio _k-medias_ pues nos da un resultado más acorde a la distribución geográfica de los lugares en los que pueden conservarse los vehículos. Lugares que se corresponden a las ciudades de: Andorra, La Rochelle, París, Suiza, zona costera de Francia-Italia y Córcega.
+
+La distribución será la siguiente:
+
+- Grupo 1: formado por 23 vehículos se distribuirán en Andorra y alguno de ellos en la zona costera de Francia-Italia ya que existen muchas semejanzas con los vehículos del grupo 5.
+- Grupo 2: formado por 25 vehículos se distribuirán en los dos garajes de París.
+- Grupo 3: formado por 16 vehículos se distribuirán en La Rochelle.
+- Grupo 4: formado por 3 vehículos se distribuirán en Córcega.
+- Grupo 5: formado por 38 vehículos se distribuirán en los 3 garajes de la zona costera de Francia-Italia.
+- Grupo 6: formado por 20 vehículos se distribuirán en los dos garajes de Suiza.
+
+# Referencias
+
+* Amat Rodrigo, J (2017) Clustering y heatmaps: aprendizaje no supervisado. Disponible en: https://rpubs.com/Joaquin_AR/310338
+* Zafra, JM (2020). Análisis Cluster. Colegio Universitario de Estudios Financieros.
+
+
+

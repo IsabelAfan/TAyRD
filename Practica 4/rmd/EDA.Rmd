@@ -1,0 +1,220 @@
+---
+title: "Los coches del jefe"
+author: "Isabel Afan de Ribera"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  pdf_document: default
+---
+
+```{r setup, fig.width=6, fig.height=5, fig.align='center', include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Resumen Ejecutivo 
+
+El dueño de un family office ha comprado 125 vehículos de todo terreno clásicos con distintas características, las cuales ha recopilado en un documento que se nos ha presentado. Como trabajadores de este family office se nos ha pedido realizar un análisis sobre cada una de las características de estos vehículos para que nuestro cliente pueda distribuirlos de forma eficiente en 10 propiedades distintas. En el presente informe se recogen los resultados obtenidos del análisis exploratorio sobre las características de los vehículos y la selección de variables más relevantes para una futura propuesta de agrupación y distribución de los vehículos.
+
+
+# 1. Objetivo
+
+El objetivo del presente trabajo es realizar un análisis sobre las características de vehículos todo terreno para facilitarle a nuestro cliente una propuesta de distribución en grupos con características similares entre sí y distintas con el resto, de tal manera que el cliente pueda organizar de forma eficiente y consistente sus distintos vehículos en 10 lugares de los que dispone. 
+
+# 2. Descripción del dataset
+
+El dataset objeto de estudio cuenta con 125 observaciones relativas a los distintos vehículos de los que el cliente es propietario y 15 variables relativas a distintas características de los todo terreno.
+
+* `marca`: Marca del todo-terreno
+* `modelo`: Modelo de todo-terreno
+* `pvp`: Precio (pesetas)
+*`cilindro`: Número de cilindros
+* `cc`: Cilindrada (cm cúbicos)
+* `potencia`: Potencia (CV)
+* `rpm`: Revoluciones por minuto
+* `peso`: Peso en kg
+*`plazas`: Número de plazas
+*`cons90`: Consumo 90 km/h
+*`cons120`: Consumo 120 km/h
+*`consurb`: Consumo urbano
+*`velocida`: Velocidad máxima
+*`acelerac`: Aceleración de 0 a 100
+* `acel2`: Tiempo de aceleración, 2 grupos 1(Menor a 10 seg) 2(Mayor a 10 seg)
+
+
+```{r libraries, warning=FALSE, message=FALSE, include=FALSE}
+library(haven)
+library(corrplot) # correlaciones
+library(PerformanceAnalytics) # EDA
+library(tidyverse)
+library(imputeTS) # NA mean
+library(dplyr)
+library(ggplot2) # visualizacion
+library(skimr) # summary
+library(factoextra) # graficos de distancias
+library(FactoMineR) 
+library(cluster) # analisis cluster
+library(clustertend) # analisis cluster
+```
+
+# 3. Desarrollo
+
+```{r, message=FALSE, include=FALSE}
+tterreno_original <- read_sav('tterreno.sav')
+View(tterreno_original)
+# hacemos un attach de los datos para que sea mas facil trabajar con las variables
+attach(tterreno_original)
+```
+
+```{r, include=FALSE}
+# convertir a data frame
+tterreno_original <- data.frame(tterreno_original)
+```
+
+```{r skim, message=FALSE, warning=FALSE, include=FALSE}
+skim(tterreno_original)
+# se observa que hay 5 variables de tipo character y 10 numeric
+# valores NA en las variables peso, cons90, cons120, consurb, velocida y acelerac
+```
+
+```{r, include=FALSE}
+# asignamos el nombre de marca a cada vehiculo
+marca <- factor(marca, levels = c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'),
+                labels = c('ASIA MOTORS', 'CHEVROLET', 'DAIHATSU', 'FORD', 'JEEP',
+                           'KIA', 'LADA', 'LAND ROVER', 'MERCEDES', 'MITSUBISHI', 'NISSAN', 'OPEL', 'SSANGYONG', 'SUZUKI', 'TATA', 'TOYOTA', 'UAZ'))
+```
+
+```{r, include=FALSE}
+# numero de modelos distintos en el dataset
+# 109 modelos diferentes y variable no numerica, la eliminamos
+unique(modelo)
+```
+
+## 3.1. Selección de variables
+
+En una primera aproximación, y partiendo de la lógica de que nuestro cliente quiere distribuir sus vehículos según características técnicas se ha decidido prescindir de las variables modelo, marca y precio. De las dos primeras cabe decir, tras analizar los datos, que existen 109 modelos diferentes y 17 marcas distintas con lo cual se entiende innecesaria la agrupación de vehículos según tales características, pues resulta muy complicado dividir en solo 10 grupos. Igualmente, teniendo en cuenta que nuestro cliente tiene como objetivo la repartición de sus coches a modo de colección y no de venta se entiende que puede prescindirse de la variable precio.
+
+En el caso de las características técnicas, a priori solo resulta discutible la utilidad de la variable acelerac pues no se conocen los datos para esta característica de 46 de los 125 vehículos, representando más de la mitad de los valores nulos que contiene el dataset. Por tanto, también vamos a prescindir de ella.
+
+También, podría discutirse la necesidad de tener en cuenta tanto la variable cilindro como cc pues ambas son caraterísticas relativas al motor siendo la segunda (cilindrada en cm) dependiente de la primera (número de cilindros) pues la cilindrada de un motor es el volumen unitario -de cada uno de sus cilindros- multiplicado por el número de cilindros. Por lo tanto, si conocemos la cilindrada de los vehículos implicitamente conocemos también el número de cilindros y podemos prescindir de esta variable (cilindro).
+
+Con respecto, a las variables cons90, cons120 y consurb puede decirse que todas se refieren a características del consumo según velocidad siendo reduante utilizar las tres, por ejemplo podría eliminarse la variable cons90 o cons120 ya que ambas van referidas al consumo en carretera.
+
+A continuación se va a proceder a realizar un _Análisis Exploratorio_ para tomar decisiones de sobre la selección de otras variables que causan más dudas.
+
+
+```{r, include=FALSE}
+# elimino marca, modelo, precio y acelerac
+tterreno <- tterreno_original[, -c(1, 2, 3, 14)]
+```
+
+```{r, message=FALSE, include=FALSE}
+skim(tterreno)
+```
+
+```{r, include=FALSE}
+tterreno <- na.omit(tterreno) # hacemos media de los na para no perder muchos datos
+
+apply(is.na(tterreno), 2, sum) # comprobamos que no quedan valores nulos
+```
+
+## 3.2. Análisis exploratorio
+
+```{r, echo=FALSE, include=FALSE}
+par(mfrow=c(3,2))
+hist(cilindro, col="cadetblue3")
+hist(cc, col="cadetblue3")
+hist(peso, col="cadetblue3")
+hist(plazas, col="cadetblue3")
+hist(potencia, col="cadetblue3")
+hist(rpm, col="cadetblue3")
+```
+
+```{r, include=FALSE}
+cor.mat = round(cor(tterreno),2) 
+cor.mat
+```
+
+Pasando a analizar relaciones entre variables, primero se puede visualizar un gráfico general de correlaciones entre todas las variables de la que puede extraerse que la característica acel2 es la que mayor correlación negativa o nula presenta, lo cual puede ayudar a diferenciar grupos en el análisis cluster. Igualmente, las variables rpm y plazas tienen poca relación con las demás.
+
+Por el contrario, las variables potencia, cilindro y cc tienen una alta asociación con las 3 variables relativas a consumo y con velocidad, siendo la que mayor correlación positiva tiene la variable velocidad con potencia, a medida que aumenta una lo hace también la otra.
+
+
+```{r, echo=FALSE}
+correlacion <- round(cor(tterreno), 1)
+corrplot(correlacion, method = "circle", type = "upper")
+```
+Como nos ha mostrado la _matriz de correlaciones_, si analizamos por separado mediante un _diagrama de dispersión_ la relación entre potencia y velocidad se ve de forma muy clara como a medida que aumenta la potencia, y como es lógico, la velocidad también lo hace. Se conoce pues que a mayor potencia tenga el vehículo más velocidad será capaz de alcanzar, por tanto, se podría llegar a prescindir de alguna de ellas.
+
+```{r, echo=FALSE}
+# potencia/velocidad
+ggplot(data = tterreno) +
+  geom_point(mapping = aes(x = potencia, y = velocida)) +
+  ggtitle("Potencia vs velocidad")
+```
+En el caso de las variables número de plazas y peso, puede llegar a pensarse, en un primer momento, que tienen una alta correlación positiva pues a mayor número de plazas más grande será el vehículo y con ello más pesado. Sin embargo, en este _diagrama de cajas_ esta asunción no parece ser tan clara ya que se aprecia que los vehículos de 2 plazas pesan más que los de 4 e incluso que vehículos de 5 plazas pesan más que de 6 o 7 y de 8 más que los de 9. Por tanto, es adecuado mantener ambas variables.
+
+```{r, echo=FALSE}
+boxplot(peso~plazas, col="cadetblue3")
+```
+Otras variables que por lógica se entienden muy relacionadas son el consumo con la velocidad. En los siguientes _diagramas de dispersión_ se comparan las variables consumo a 90 km/h, consumo a 120 y consumo urbano con la variable velocidad. Como puede observarse, de manera general a medida que aumenta la velocidad aumenta el consumo, pero no siempre es así. 
+
+Por ejemplo, puede verse que en una velocidad de entre 140 y 170 hay vehículos que consumen bastante más que otros, lo cual dependerá de otras características. Si bien, puede concluirse que no es necesaria la inclusión de los tres tipos de consumo pues tienen relaciones muy parecidas con las demás variables como ya se vió en el _gráfico de correlaciones_, podría eliminarse la variable cons90, por ejemplo, ya que es muy similar a cons120 pero presenta más relaciones con el resto de variable con lo cual puede ser de menos ayuda que cons120 a la hora de diferenciar en grupos.
+
+
+```{r, echo=FALSE}
+# consumo90/velocidad
+ggplot(data = tterreno) +
+  geom_point(mapping = aes(x = velocida, y = cons90)) +
+  ggtitle("Consumo 90 vs velocidad")
+# consumo120/velocidad
+ggplot(data = tterreno) +
+  geom_point(mapping = aes(x = velocida, y = cons120)) +
+  ggtitle("Consumo 120 vs velocidad")
+# consumo urbano/velocidad
+ggplot(data = tterreno) +
+  geom_point(mapping = aes(x = velocida, y = consurb)) +
+  ggtitle("Consumo Urbano vs velocidad")
+```
+
+```{r, include=FALSE}
+corrplot(cor.mat, type="full", order="hclust", addrect = 3,
+         tl.col="black", tl.cex=0.7, tl.srt=45)
+```
+
+```{r, include=FALSE}
+chart.Correlation(tterreno, histogram=TRUE, pch=19)
+```
+
+```{r warning=FALSE, include=FALSE}
+# escalamos/tipificamos las variables
+performScaling = T 
+if (performScaling) {
+  
+      # Loop sobre cada columna
+      for (colName in names(tterreno)) {
+        
+        # Comprueba si la columna es de datos numéricos.
+        if(class(tterreno[,colName]) == 'integer' | class(tterreno[,colName]) == 'numeric') {
+          
+            # escala la columna.
+            tterreno[,colName] = scale(tterreno[,colName])
+        }
+    }
+}
+```
+
+# 4. Conclusiones
+
+En general, los vehículos de nuestro cliente son vehículos con características variadas siendo las más comunes: 4 cilindros, cilindrada de entre 2000 y 3000 cm3, peso elevado, con alta capacidad de pasajeros y potencia media.
+
+Las variables modelo, marca y precio pueden ser descartadas en un posterior análisis cluster pues con ellas no es fácil agrupar los vehículos en grupos homogéneos, especialmente la característica modelo ya que hay hasta 109 modelos distintos. Además, el cliente quiere realizar la asignación por grupos a modo de colección y no de puesta en venta. Igualmente, puede descartarse la variable aceleración al no disponerse de una gran parte de sus datos.
+
+La variable cons90 también se ha eliminado al igual que cilindro pues ambas pueden ser explicadas por otras variables resultando redundante su información.
+
+Es importante destacar que a pesar de que hay variables que en un primer momento pueden parecer muy relacionadas, como el peso y la velocidad, no siempre lo están y pueden ayudar en la distinción de grupos por ello nos quedamos con ambas.
+
+
+# Referencias
+
+* El cilindro y la cilindrada. Disponible en: https://www.motor.es/que-es/cilindro
+
+* Velocidad y Aceleración Vs. Consumo de Gasolina. Disponible en: https://blog.genesis.es/velocidad-y-aceleracion-vs-consumo-de-gasolina/
